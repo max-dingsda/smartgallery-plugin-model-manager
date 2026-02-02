@@ -216,3 +216,6 @@ tests/__pycache__/
 playwright-report/
 test-results/
 playwright/.cache/
+test_gallery.sqlite-shm
+.claude/settings.local.json
+test_gallery.sqlite-wal

@@ -5,6 +5,7 @@ A plugin for [SmartGallery](https://github.com/biagiomaf/smart-comfyui-gallery) 
 ## 🚧 Development Status
 
 **Current Version:** v0.1.0
+![Tests](https://github.com/max-dingsda/smartgallery-plugin-model-manager/actions/workflows/test.yml/badge.svg)
 **Status:** Plugin code complete, awaiting SmartGallery core plugin loader implementation
 
 This plugin is ready for integration but cannot be installed yet. SmartGallery's plugin architecture is currently being developed by [@biagiomaf](https://github.com/biagiomaf). Once the core plugin loader is merged, this plugin will be installable.

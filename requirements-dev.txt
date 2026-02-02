@@ -1,3 +1,4 @@
+# install only if you want to run tests (defined in tests/ folder)
 pytest>=8.0.0
 pytest-playwright>=0.4.0
 playwright>=1.40.0
