@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Manager</title>
+<style>
+  /* --- CSS Variables (dark theme defaults) --- */
+  :root {
+    --glass-bg: rgba(255,255,255,0.07);
+    --glass-border: rgba(255,255,255,0.15);
+    --surface-color: #1e1e1e;
+    --surface-hover: rgba(255,255,255,0.1);
+    --text-color: #e0e0e0;
+    --text-muted: #888;
+    --primary-color: #4a9eff;
+    --danger-color: #dc3545;
+  }
+  body {
+    margin: 0; padding: 0;
+    background: #121212;
+    color: var(--text-color);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* --- Toolbar --- */
+  .mm-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: var(--surface-color);
+    border-bottom: 1px solid var(--glass-border);
+    flex-wrap: wrap;
+  }
+  .mm-toolbar h2 { margin: 0; color: #fff; font-size: 1.1rem; margin-right: 10px; }
+
+  /* --- Search --- */
+  .mm-search { display: inline-flex; align-items: center; gap: 8px; }
+  .mm-search-input {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    padding: 0 0.9rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    height: 42px;
+    width: 200px;
+    box-sizing: border-box;
+    outline: none;
+    transition: all 0.2s;
+  }
+  .mm-search-input::placeholder { color: var(--text-muted); }
+  .mm-search-input:focus { background: var(--surface-hover); border-color: var(--text-muted); }
+
+  /* --- Glass Button (shared base) --- */
+  .mm-btn {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    color: var(--text-color);
+    padding: 0 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 42px;
+    white-space: nowrap;
+    box-sizing: border-box;
+    transition: all 0.2s;
+    backdrop-filter: blur(10px);
+  }
+  .mm-btn:hover { background: var(--surface-hover); border-color: var(--text-muted); transform: translateY(-1px); }
+  .mm-btn:active { transform: translateY(0); }
+  .mm-btn.clear { width: 42px; padding: 0; }
+  .mm-btn.danger { background: var(--danger-color); border-color: var(--danger-color); color: #fff; width: 100%; }
+
+  /* --- Models Container --- */
+  .mm-container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+
+  /* --- Type Sections --- */
+  .mm-type-section { margin-bottom: 30px; }
+  .mm-type-section h3 { color: #fff; margin-bottom: 10px; font-size: 18px; }
+  .mm-type-section h3 .count { color: #888; font-size: 14px; font-weight: normal; }
+
+  /* --- Table --- */
+  .mm-table { width: 100%; border-collapse: collapse; background: #2a2a2a; border-radius: 8px; overflow: hidden; }
+  .mm-table thead { background: #3a3a3a; }
+  .mm-table th { padding: 12px; text-align: left; color: #fff; font-weight: 600; }
+  .mm-table tbody tr { border-bottom: 1px solid #3a3a3a; }
+  .mm-table tbody tr:hover { background: #333; }
+  .mm-table td { padding: 12px; color: #ddd; }
+
+  /* --- Special Cells --- */
+  .mm-path-cell { color: #888; font-size: 12px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-trigger-cell { color: #4a9eff; font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mm-tags-cell { color: #aaa; font-size: 12px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* --- Checkbox --- */
+  .mm-checkbox { width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary-color); margin-right: 8px; vertical-align: middle; }
+
+  /* --- Loading --- */
+  #mm-loading { padding: 40px; text-align: center; color: var(--text-muted); }
+
+  /* --- CivitAI Overlay --- */
+  .mm-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.7); z-index: 10000;
+    align-items: center; justify-content: center;
+  }
+  .mm-overlay-box {
+    background: var(--surface-color); padding: 30px; border-radius: 12px;
+    min-width: 400px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .mm-overlay-box h3 { margin: 0 0 20px 0; color: var(--primary-color); }
+  #mm-civitai-status { margin: 0 0 15px 0; color: var(--text-color); }
+  .mm-progress-track { background: rgba(0,0,0,0.3); height: 24px; border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+  #mm-civitai-progress { background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s ease; }
+
+  /* --- Notification Toast --- */
+  #mm-notifications { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+  .mm-toast {
+    background: #2a2a2a; border: 1px solid var(--glass-border); color: var(--text-color);
+    padding: 12px 20px; border-radius: 8px; font-size: 0.9rem;
+    animation: mm-fadeIn 0.3s ease;
+  }
+  .mm-toast.success { border-color: #4caf50; }
+  .mm-toast.warning { border-color: #ff9800; }
+  .mm-toast.error { border-color: var(--danger-color); }
+  @keyframes mm-fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+  <!-- Notification container -->
+  <div id="mm-notifications"></div>
+
+  <!-- Toolbar -->
+  <div class="mm-toolbar">
+    <h2>🧠 Model Manager</h2>
+    <div class="mm-search">
+      <input type="text" id="mm-search-input" class="mm-search-input" placeholder="Search models..." autocomplete="off">
+      <button type="button" id="mm-search-clear" class="mm-btn clear" title="Clear">✕</button>
+    </div>
+    <button id="mm-refresh-btn" class="mm-btn">🔄 Refresh</button>
+    <button id="mm-civitai-btn" class="mm-btn" style="display:none;">🔍 Fetch CivitAI Metadata</button>
+  </div>
+
+  <!-- Models Content -->
+  <div class="mm-container">
+    <div id="mm-loading">Loading models...</div>
+    <div id="mm-content"></div>
+  </div>
+
+  <!-- CivitAI Progress Overlay -->
+  <div id="mm-civitai-overlay" class="mm-overlay">
+    <div class="mm-overlay-box">
+      <h3>🔍 Fetching CivitAI Metadata</h3>
+      <p id="mm-civitai-status">Processing: 0/0 models</p>
+      <div class="mm-progress-track">
+        <div id="mm-civitai-progress"></div>
+      </div>
+      <button id="mm-civitai-cancel" class="mm-btn danger">✕ Cancel</button>
+    </div>
+  </div>
+
+  <script src="{{ url_for('model_manager.static', filename='js/model_manager.js') }}"></script>
+</body>
+</html>
