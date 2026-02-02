@@ -28,6 +28,21 @@ jobs:
     - name: Install Playwright browsers
       run: playwright install chromium
 
+    - name: Create test model files
+      run: |
+        mkdir -p ./models/checkpoints
+        mkdir -p ./models/loras
+        mkdir -p ./models/embeddings
+        mkdir -p ./models/diffusion_models
+        # Create dummy .safetensors files (empty is fine for testing)
+        touch ./models/checkpoints/test-checkpoint-1.safetensors
+        touch ./models/checkpoints/test-checkpoint-2.safetensors
+        touch ./models/loras/test-lora-1.safetensors
+        touch ./models/loras/test-lora-2.safetensors
+        touch ./models/embeddings/test-embedding-1.safetensors
+        touch ./models/diffusion_models/test-diffusion-1.safetensors
+        echo "Created test model files for scanning"
+
     - name: Run tests
       run: pytest tests/ -v
 
