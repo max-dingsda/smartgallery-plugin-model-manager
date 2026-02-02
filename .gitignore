@@ -209,3 +209,10 @@ __marimo__/
 #smartgallery - only local copy, just for referencing
 smart-comfyui-gallery
 test_gallery.sqlite
+
+# Testing
+tests/__pycache__/
+.pytest_cache/
+playwright-report/
+test-results/
+playwright/.cache/
