@@ -92,8 +92,43 @@ async function mm_loadModels() {
 
         if (loading) loading.style.display = 'none';
 
-        if (data.status === 'success' && data.models) {
-            mm_renderModels(data.models);
+        if (data.status === 'error') {
+            // Show error message (e.g. missing dependencies)
+            content.innerHTML = `
+                <div style="padding: 40px; text-align: center;">
+                    <div style="display: inline-block; text-align: left; background: rgba(220,53,69,0.1);
+                                border: 1px solid #dc3545; border-radius: 12px; padding: 30px; max-width: 600px;">
+                        <h3 style="color: #dc3545; margin: 0 0 15px 0;">⚠ Plugin Error</h3>
+                        <p style="color: #e0e0e0; margin: 0 0 15px 0;">${data.message || 'An unknown error occurred.'}</p>
+                        ${data.install_hint ? `
+                            <p style="color: #e0e0e0; margin: 0 0 8px 0; font-weight: 600;">Install with:</p>
+                            <pre style="background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 8px;
+                                        overflow-x: auto; margin: 0 0 15px 0; font-size: 0.9rem;
+                                        color: #4a9eff;">${data.install_hint}</pre>
+                            <p style="color: #888; font-size: 0.85rem; margin: 0;">
+                                After installing, restart SmartGallery to activate the plugin.
+                            </p>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        } else if (data.status === 'success' && data.models) {
+            if (data.models.length === 0) {
+                // No models found - show settings hint
+                content.innerHTML = `
+                    <div style="padding: 40px; text-align: center;">
+                        <h3 style="color: var(--text-muted); margin-bottom: 20px;">No models found</h3>
+                        <p style="color: var(--text-muted); margin-bottom: 20px;">
+                            The models directory is empty or not configured.
+                        </p>
+                        <button onclick="mm_openSettings()" class="mm-btn" style="background: var(--primary-color); border-color: var(--primary-color); color: white;">
+                            ⚙️ Configure Models Path
+                        </button>
+                    </div>
+                `;
+            } else {
+                mm_renderModels(data.models);
+            }
         }
     } catch (error) {
         console.error('Failed to load models:', error);
@@ -197,7 +232,11 @@ let mm_abortController = null;
 function mm_updateSelection() {
     mm_selectedModels = [];
     document.querySelectorAll('.mm-select-cb:checked').forEach(cb => {
-        mm_selectedModels.push({ hash: cb.dataset.modelHash, id: cb.dataset.modelId });
+        // Only count visible (not filtered) rows
+        const row = cb.closest('tr');
+        if (row && row.style.display !== 'none') {
+            mm_selectedModels.push({ hash: cb.dataset.modelHash, id: cb.dataset.modelId });
+        }
     });
 
     const fetchBtn = document.getElementById('mm-civitai-btn');
@@ -210,8 +249,14 @@ function mm_updateSelection() {
 function mm_setupSelectAll() {
     document.querySelectorAll('.mm-select-all').forEach(selectAll => {
         selectAll.addEventListener('change', function() {
-            const checkboxes = this.closest('table').querySelectorAll('.mm-select-cb');
-            checkboxes.forEach(cb => { cb.checked = this.checked; });
+            const rows = this.closest('table').querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                // Only toggle checkboxes in visible (not filtered) rows
+                if (row.style.display !== 'none') {
+                    const cb = row.querySelector('.mm-select-cb');
+                    if (cb) cb.checked = this.checked;
+                }
+            });
             mm_updateSelection();
         });
     });
@@ -246,42 +291,42 @@ async function mm_fetchCivitAI() {
         mm_showNotification('CivitAI fetch cancelled', 'warning');
     };
 
-    // PHASE 1: Calculate full SHA256 hashes
-    statusText.textContent = 'Calculating full SHA256 hashes...';
+    // PHASE 1: Calculate full SHA256 hashes (one by one for cancellation support)
     progressBar.style.width = '0%';
 
-    const modelIds = mm_selectedModels.map(m => m.id);
-
-    try {
-        const hashResponse = await fetch('/plugins/model_manager/calculate-full-hash', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ modelIds: modelIds }),
-            signal: mm_abortController.signal
-        });
-
+    let hashProcessed = 0;
+    for (const model of mm_selectedModels) {
         if (mm_civitaiCancelled) return;
 
-        const hashData = await hashResponse.json();
+        hashProcessed++;
+        statusText.textContent = `Calculating SHA256 hash: ${hashProcessed}/${total} models`;
+        progressBar.style.width = (hashProcessed / total * 10).toFixed(0) + '%';
 
-        if (hashData.status === 'success') {
-            hashData.results.forEach(result => {
-                if (result.status === 'success') {
-                    const model = mm_selectedModels.find(m => m.id === result.modelId);
-                    if (model) model.hash = result.hash;
-                }
+        try {
+            const hashResponse = await fetch('/plugins/model_manager/calculate-full-hash', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ modelIds: [model.id] }),
+                signal: mm_abortController.signal
             });
-        } else {
-            mm_showNotification('Failed to calculate hashes: ' + hashData.message, 'error');
-            overlay.style.display = 'none';
-            return;
+
+            if (mm_civitaiCancelled) return;
+
+            const hashData = await hashResponse.json();
+
+            if (hashData.status === 'success' && hashData.results.length > 0) {
+                const result = hashData.results[0];
+                if (result.status === 'success') {
+                    model.hash = result.hash;
+                }
+            }
+        } catch (error) {
+            if (error.name === 'AbortError') return;
+            console.error(`Hash error for ${model.id}:`, error.message);
         }
-    } catch (error) {
-        if (error.name === 'AbortError') return;
-        mm_showNotification('Hash calculation error: ' + error.message, 'error');
-        overlay.style.display = 'none';
-        return;
     }
+
+    if (mm_civitaiCancelled) return;
 
     // PHASE 2: Fetch from CivitAI
     let processed = 0;
@@ -372,6 +417,143 @@ async function mm_fetchCivitAI() {
 }
 
 // ---------------------------------------------------------------------------
+// 9. Settings Management
+// ---------------------------------------------------------------------------
+async function mm_openSettings() {
+    const overlay = document.getElementById('mm-settings-overlay');
+    const pathInput = document.getElementById('mm-settings-path');
+
+    // Reset suggestions from previous open
+    const suggestionsContainer = document.getElementById('mm-path-suggestions');
+    if (suggestionsContainer) suggestionsContainer.innerHTML = '';
+
+    // Load current settings
+    try {
+        const response = await fetch('/plugins/model_manager/settings');
+        const data = await response.json();
+        if (data.status === 'success') {
+            pathInput.value = data.settings.models_path || '';
+        }
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+
+    overlay.style.display = 'flex';
+}
+
+async function mm_detectPaths() {
+    const suggestionsContainer = document.getElementById('mm-path-suggestions');
+    const detectBtn = document.getElementById('mm-detect-btn');
+
+    detectBtn.disabled = true;
+    detectBtn.textContent = '🔍 Searching...';
+    suggestionsContainer.innerHTML = '';
+
+    try {
+        const detectResponse = await fetch('/plugins/model_manager/detect-paths');
+        const detectData = await detectResponse.json();
+
+        if (detectData.status === 'success' && detectData.paths.length > 0) {
+            const currentPath = document.getElementById('mm-settings-path').value.trim();
+            suggestionsContainer.innerHTML = detectData.paths.map(pathInfo => {
+                const isActive = currentPath && pathInfo.path === currentPath;
+                const statusIcon = isActive ? '✓' : '📁';
+                const statusColor = isActive ? 'var(--primary-color)' : 'var(--text-muted)';
+                const modelText = pathInfo.model_count > 0
+                    ? `${pathInfo.model_count} models found`
+                    : 'has model folders';
+
+                return `
+                    <div class="mm-path-suggestion" data-path="${pathInfo.path.replace(/"/g, '&quot;')}"
+                         style="display: flex; align-items: center; gap: 10px; padding: 10px;
+                                background: var(--glass-bg); border: 1px solid ${isActive ? 'var(--primary-color)' : 'var(--glass-border)'};
+                                border-radius: 8px;">
+                        <span class="mm-path-icon" style="font-size: 1.2rem; color: ${statusColor};">${statusIcon}</span>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600; color: var(--text-color);">${pathInfo.path}</div>
+                            <div style="font-size: 0.85rem; color: var(--text-muted);">${modelText}</div>
+                        </div>
+                        <button
+                            class="mm-btn"
+                            style="background: var(--primary-color); border-color: var(--primary-color); color: white;"
+                            onclick="mm_selectPath('${pathInfo.path.replace(/\\/g, '\\\\')}')"
+                        >
+                            Select
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            suggestionsContainer.innerHTML = `
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin: 4px 0 0 0;">
+                    No model directories found automatically. Please enter the path manually below.
+                </p>
+            `;
+        }
+    } catch (error) {
+        console.error('Failed to detect paths:', error);
+        suggestionsContainer.innerHTML = `
+            <p style="color: var(--danger-color); font-size: 0.85rem; margin: 4px 0 0 0;">
+                Detection failed: ${error.message}
+            </p>
+        `;
+    }
+
+    detectBtn.disabled = false;
+    detectBtn.textContent = '🔍 Auto-detect model directories';
+}
+
+function mm_selectPath(path) {
+    const pathInput = document.getElementById('mm-settings-path');
+    pathInput.value = path;
+
+    // Update visual indicators: checkmark only on selected path
+    document.querySelectorAll('.mm-path-suggestion').forEach(el => {
+        const icon = el.querySelector('.mm-path-icon');
+        const isSelected = el.dataset.path === path;
+        if (icon) {
+            icon.textContent = isSelected ? '✓' : '📁';
+            icon.style.color = isSelected ? 'var(--primary-color)' : 'var(--text-muted)';
+        }
+        el.style.borderColor = isSelected ? 'var(--primary-color)' : 'var(--glass-border)';
+    });
+}
+
+async function mm_saveSettings() {
+    const pathInput = document.getElementById('mm-settings-path');
+    const path = pathInput.value.trim();
+
+    if (!path) {
+        mm_showNotification('Please enter a models directory path', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/plugins/model_manager/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ models_path: path })
+        });
+
+        const data = await response.json();
+
+        if (data.status === 'success') {
+            mm_showNotification('Settings saved! Reloading models...', 'success');
+            document.getElementById('mm-settings-overlay').style.display = 'none';
+            mm_loadModels();
+        } else {
+            mm_showNotification(data.message || 'Failed to save settings', 'error');
+        }
+    } catch (error) {
+        mm_showNotification('Error saving settings: ' + error.message, 'error');
+    }
+}
+
+function mm_closeSettings() {
+    document.getElementById('mm-settings-overlay').style.display = 'none';
+}
+
+// ---------------------------------------------------------------------------
 // 8. Wiring — runs once on page load
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', function() {
@@ -382,6 +564,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // CivitAI button
     const civitaiBtn = document.getElementById('mm-civitai-btn');
     if (civitaiBtn) civitaiBtn.addEventListener('click', mm_fetchCivitAI);
+
+    // Settings button
+    const settingsBtn = document.getElementById('mm-settings-btn');
+    if (settingsBtn) settingsBtn.addEventListener('click', mm_openSettings);
+
+    // Settings modal handlers
+    const settingsSaveBtn = document.getElementById('mm-settings-save');
+    const settingsCancelBtn = document.getElementById('mm-settings-cancel');
+    const detectBtn = document.getElementById('mm-detect-btn');
+    if (settingsSaveBtn) settingsSaveBtn.addEventListener('click', mm_saveSettings);
+    if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', mm_closeSettings);
+    if (detectBtn) detectBtn.addEventListener('click', mm_detectPaths);
 
     // Search input
     const searchInput = document.getElementById('mm-search-input');

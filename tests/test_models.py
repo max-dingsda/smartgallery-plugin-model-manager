@@ -1,138 +1,189 @@
 """
 End-to-end tests for Model Manager plugin.
-Tests UI functionality using Playwright.
+
+Two page fixtures are available:
+  - page:        navigates to /plugins/model_manager/ (models may or may not exist)
+  - loaded_page: same, but with dummy models configured and rendered
+
+Tests are grouped by functionality and ordered so that independent checks
+(startup, settings UI) run before tests that rely on loaded models.
 """
-import re
 from playwright.sync_api import Page, expect
 
 
+# ---------------------------------------------------------------------------
+# 1. Startup & Page Load
+# ---------------------------------------------------------------------------
+
 def test_page_loads(page: Page):
-    """Test that the Model Manager page loads successfully."""
-    # Check title
+    """Page renders with correct title and toolbar — no crash."""
     expect(page).to_have_title("Model Manager")
-
-    # Check toolbar header exists
-    header = page.locator("h2:has-text('Model Manager')")
-    expect(header).to_be_visible()
+    expect(page.locator(".mm-toolbar")).to_be_visible()
+    expect(page.locator("h2")).to_contain_text("Model Manager")
 
 
-def test_models_list_appears(page: Page):
-    """Test that models are loaded and displayed."""
-    # Wait for loading to disappear
-    loading = page.locator("#mm-loading")
-    expect(loading).not_to_be_visible(timeout=10000)
+def test_initial_state_is_valid(page: Page):
+    """After loading, the page shows either 'No models found' or model tables."""
+    expect(page.locator("#mm-loading")).not_to_be_visible(timeout=10000)
 
-    # Check that at least one model type section exists
+    has_models = page.locator(".mm-type-section").count() > 0
+    has_empty_hint = page.locator("text=No models found").count() > 0
+
+    assert has_models or has_empty_hint, (
+        "Page shows neither models nor empty-state hint"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. Settings Modal
+# ---------------------------------------------------------------------------
+
+def test_settings_button_opens_modal(page: Page):
+    """Clicking the settings button opens the settings overlay."""
+    page.locator("#mm-settings-btn").click()
+
+    overlay = page.locator("#mm-settings-overlay")
+    expect(overlay).to_be_visible()
+    expect(page.locator("#mm-settings-path")).to_be_visible()
+    expect(page.locator("#mm-settings-save")).to_be_visible()
+    expect(page.locator("#mm-settings-cancel")).to_be_visible()
+
+
+def test_settings_cancel_closes_modal(page: Page):
+    """Cancel button closes the settings overlay."""
+    page.locator("#mm-settings-btn").click()
+    expect(page.locator("#mm-settings-overlay")).to_be_visible()
+
+    page.locator("#mm-settings-cancel").click()
+    expect(page.locator("#mm-settings-overlay")).not_to_be_visible()
+
+
+def test_configure_path_loads_models(page: Page, test_server, models_dir):
+    """Setting a valid path via the modal triggers a scan and shows tables."""
+    page.locator("#mm-settings-btn").click()
+    page.locator("#mm-settings-path").fill(models_dir)
+    page.locator("#mm-settings-save").click()
+
+    # After save the JS calls mm_loadModels() automatically
+    page.wait_for_selector(".mm-type-section", timeout=15000)
+
     sections = page.locator(".mm-type-section")
-    expect(sections).not_to_have_count(0)
-
-    # Check that tables have rows
-    rows = page.locator(".mm-table tbody tr")
-    expect(rows).not_to_have_count(0)
+    assert sections.count() > 0, "No model type sections after configuring path"
 
 
-def test_search_filters_models(page: Page):
-    """Test that search input filters the model list."""
-    # Wait for models to load
-    expect(page.locator("#mm-loading")).not_to_be_visible(timeout=10000)
+# ---------------------------------------------------------------------------
+# 3. Model Display  (uses loaded_page — models are guaranteed)
+# ---------------------------------------------------------------------------
 
-    # Count total rows before search
-    all_rows = page.locator(".mm-table tbody tr")
-    total_count = all_rows.count()
-    assert total_count > 0, "No models loaded"
+def test_all_model_types_displayed(loaded_page: Page):
+    """All 4 model type sections are rendered."""
+    sections = loaded_page.locator(".mm-type-section")
+    assert sections.count() == 4, f"Expected 4 sections, got {sections.count()}"
 
-    # Type into search field (search for "flux")
-    search_input = page.locator("#mm-search-input")
-    search_input.fill("flux")
-
-    # Wait a bit for filtering
-    page.wait_for_timeout(300)
-
-    # Count visible rows after search
-    visible_rows = page.locator(".mm-table tbody tr:visible")
-    filtered_count = visible_rows.count()
-
-    # Filtered count should be less than total (assuming "flux" doesn't match everything)
-    assert filtered_count < total_count, "Search didn't filter anything"
-
-    # Clear search
-    clear_btn = page.locator("#mm-search-clear")
-    clear_btn.click()
-
-    # All rows should be visible again
-    page.wait_for_timeout(300)
-    assert all_rows.count() == total_count
+    for label in ["Checkpoints", "Diffusion Models", "LoRAs", "Embeddings"]:
+        heading = loaded_page.locator(f".mm-type-section h3:has-text('{label}')")
+        expect(heading).to_be_visible()
 
 
-def test_checkbox_selection(page: Page):
-    """Test that checkboxes can be selected and CivitAI button appears."""
-    # Wait for models to load
-    expect(page.locator("#mm-loading")).not_to_be_visible(timeout=10000)
+def test_correct_model_count(loaded_page: Page):
+    """Total number of table rows matches the 6 dummy files."""
+    rows = loaded_page.locator(".mm-table tbody tr")
+    assert rows.count() == 6, f"Expected 6 rows, got {rows.count()}"
 
-    # CivitAI button should be hidden initially
-    civitai_btn = page.locator("#mm-civitai-btn")
+
+def test_model_names_displayed(loaded_page: Page):
+    """All dummy model names appear in the rendered tables."""
+    text = loaded_page.locator("#mm-content").inner_text()
+
+    expected = [
+        "test-checkpoint-v1", "test-checkpoint-v2",
+        "test-lora-style", "test-lora-character",
+        "test-embedding", "test-diffusion",
+    ]
+    for name in expected:
+        assert name in text, f"Model '{name}' not found on page"
+
+
+# ---------------------------------------------------------------------------
+# 4. Search
+# ---------------------------------------------------------------------------
+
+def test_search_filters_models(loaded_page: Page):
+    """Typing a query hides non-matching rows."""
+    loaded_page.locator("#mm-search-input").fill("checkpoint")
+    loaded_page.wait_for_timeout(300)
+
+    visible = loaded_page.locator(".mm-table tbody tr:visible")
+    assert visible.count() == 2, f"Expected 2 visible rows, got {visible.count()}"
+
+
+def test_search_clear_restores_all(loaded_page: Page):
+    """Clearing the search shows all 6 rows again."""
+    loaded_page.locator("#mm-search-input").fill("checkpoint")
+    loaded_page.wait_for_timeout(300)
+
+    loaded_page.locator("#mm-search-clear").click()
+    loaded_page.wait_for_timeout(300)
+
+    rows = loaded_page.locator(".mm-table tbody tr")
+    assert rows.count() == 6, f"Expected 6 rows after clear, got {rows.count()}"
+
+
+def test_search_no_results(loaded_page: Page):
+    """Searching for a non-existent term hides all rows."""
+    loaded_page.locator("#mm-search-input").fill("nonexistent_xyz_999")
+    loaded_page.wait_for_timeout(300)
+
+    visible = loaded_page.locator(".mm-table tbody tr:visible")
+    assert visible.count() == 0, f"Expected 0 visible rows, got {visible.count()}"
+
+
+# ---------------------------------------------------------------------------
+# 5. Selection & CivitAI Button
+# ---------------------------------------------------------------------------
+
+def test_checkbox_shows_civitai_button(loaded_page: Page):
+    """Checking a model checkbox makes the CivitAI button appear with count."""
+    civitai_btn = loaded_page.locator("#mm-civitai-btn")
     expect(civitai_btn).not_to_be_visible()
 
-    # Select first model checkbox
-    first_checkbox = page.locator(".mm-select-cb").first
-    first_checkbox.check()
-
-    # CivitAI button should now be visible
+    # Check first model
+    loaded_page.locator(".mm-select-cb").first.check()
     expect(civitai_btn).to_be_visible()
-    expect(civitai_btn).to_contain_text("Fetch CivitAI Metadata (1)")
+    expect(civitai_btn).to_contain_text("(1)")
 
-    # Select second model
-    second_checkbox = page.locator(".mm-select-cb").nth(1)
-    second_checkbox.check()
+    # Check second model
+    loaded_page.locator(".mm-select-cb").nth(1).check()
+    expect(civitai_btn).to_contain_text("(2)")
 
-    # Button text should update
-    expect(civitai_btn).to_contain_text("Fetch CivitAI Metadata (2)")
-
-    # Uncheck both
-    first_checkbox.uncheck()
-    second_checkbox.uncheck()
-
-    # Button should hide again
+    # Uncheck both — button hides
+    loaded_page.locator(".mm-select-cb").first.uncheck()
+    loaded_page.locator(".mm-select-cb").nth(1).uncheck()
     expect(civitai_btn).not_to_be_visible()
 
 
-def test_select_all_checkbox(page: Page):
-    """Test that 'Select All' checkbox works."""
-    # Wait for models to load
-    expect(page.locator("#mm-loading")).not_to_be_visible(timeout=10000)
+def test_select_all_in_section(loaded_page: Page):
+    """Select-all checkbox toggles all checkboxes in its table section."""
+    select_all = loaded_page.locator(".mm-select-all").first
+    civitai_btn = loaded_page.locator("#mm-civitai-btn")
 
-    # Find first section's "Select All" checkbox
-    select_all = page.locator(".mm-select-all").first
     select_all.check()
-
-    # All checkboxes in that section should be checked
-    # (We can't easily count them all, but CivitAI button should appear)
-    civitai_btn = page.locator("#mm-civitai-btn")
     expect(civitai_btn).to_be_visible()
 
-    # Uncheck select-all
     select_all.uncheck()
-
-    # CivitAI button should hide
     expect(civitai_btn).not_to_be_visible()
 
 
-def test_refresh_button(page: Page):
-    """Test that refresh button reloads the model list."""
-    # Wait for initial load
-    expect(page.locator("#mm-loading")).not_to_be_visible(timeout=10000)
+# ---------------------------------------------------------------------------
+# 6. Refresh
+# ---------------------------------------------------------------------------
 
-    # Click refresh button
-    refresh_btn = page.locator("#mm-refresh-btn")
-    refresh_btn.click()
+def test_refresh_reloads_models(loaded_page: Page):
+    """Refresh button reloads the model list and tables reappear."""
+    loaded_page.locator("#mm-refresh-btn").click()
 
-    # Loading indicator should appear briefly
-    loading = page.locator("#mm-loading")
-    expect(loading).to_be_visible()
+    # Wait for tables to (re-)appear
+    loaded_page.wait_for_selector(".mm-type-section", timeout=10000)
 
-    # Then disappear again
-    expect(loading).not_to_be_visible(timeout=10000)
-
-    # Models should still be there
-    sections = page.locator(".mm-type-section")
-    expect(sections).not_to_have_count(0)
+    rows = loaded_page.locator(".mm-table tbody tr")
+    assert rows.count() == 6, f"Expected 6 rows after refresh, got {rows.count()}"

@@ -50,6 +50,33 @@ http://127.0.0.1:5001/plugins/model_manager/
 
 The test server simulates SmartGallery's plugin loader and creates a local `test_gallery.sqlite` database.
 
+## 🧪 Automated Tests
+
+End-to-end tests using [Playwright](https://playwright.dev/python/) verify the plugin in a real browser against a live test server.
+
+```bash
+pip install -r requirements-dev.txt
+playwright install chromium
+pytest tests/ -v
+```
+
+| # | Test | Description |
+|---|------|-------------|
+| 1 | `test_page_loads` | Page renders with correct title and toolbar |
+| 2 | `test_initial_state_is_valid` | Shows "No models found" or model tables after load |
+| 3 | `test_settings_button_opens_modal` | Settings button opens the settings overlay |
+| 4 | `test_settings_cancel_closes_modal` | Cancel button closes the settings overlay |
+| 5 | `test_configure_path_loads_models` | Setting a valid path triggers scan and shows tables |
+| 6 | `test_all_model_types_displayed` | All 4 model type sections are rendered |
+| 7 | `test_correct_model_count` | Total row count matches the 6 dummy model files |
+| 8 | `test_model_names_displayed` | All dummy model names appear in the tables |
+| 9 | `test_search_filters_models` | Search hides non-matching rows |
+| 10 | `test_search_clear_restores_all` | Clearing search restores all rows |
+| 11 | `test_search_no_results` | Non-existent search term hides all rows |
+| 12 | `test_checkbox_shows_civitai_button` | Checking a model shows the CivitAI button with count |
+| 13 | `test_select_all_in_section` | Select-all toggles all checkboxes in a section |
+| 14 | `test_refresh_reloads_models` | Refresh button reloads and re-renders all models |
+
 ## 🏗️ Architecture
 
 - **`config.py`**: Configuration variables (model paths, file extensions)

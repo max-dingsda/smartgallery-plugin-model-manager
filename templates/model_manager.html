@@ -149,6 +149,7 @@
     </div>
     <button id="mm-refresh-btn" class="mm-btn">🔄 Refresh</button>
     <button id="mm-civitai-btn" class="mm-btn" style="display:none;">🔍 Fetch CivitAI Metadata</button>
+    <button id="mm-settings-btn" class="mm-btn">⚙️ Settings</button>
   </div>
 
   <!-- Models Content -->
@@ -168,5 +169,49 @@
       <button id="mm-civitai-cancel" class="mm-btn danger">✕ Cancel</button>
     </div>
   </div>
+
+  <!-- Settings Modal -->
+  <div id="mm-settings-overlay" class="mm-overlay" style="display:none;">
+    <div class="mm-overlay-box">
+      <h3>⚙️ Settings</h3>
+
+      <!-- Auto-detect section -->
+      <div style="margin: 20px 0;">
+        <button id="mm-detect-btn" class="mm-btn" style="width: 100%; background: var(--glass-bg); border-color: var(--glass-border);">
+          🔍 Auto-detect model directories
+        </button>
+        <div id="mm-path-suggestions" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+          <!-- Auto-detection results will be inserted here -->
+        </div>
+      </div>
+
+      <!-- Manual path input -->
+      <div style="margin: 20px 0;">
+        <label for="mm-settings-path" style="display: block; margin-bottom: 8px; font-weight: 600;">
+          Or enter path manually:
+        </label>
+        <input
+          type="text"
+          id="mm-settings-path"
+          placeholder="e.g., F:/AI/ComfyUI/models"
+          style="width: 100%; padding: 10px; background: var(--glass-bg); border: 1px solid var(--glass-border);
+                 color: var(--text-color); border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;"
+        />
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 8px 0 0 0;">
+          Enter the full path to your ComfyUI models directory
+        </p>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button id="mm-settings-save" class="mm-btn" style="flex: 1; background: var(--primary-color); border-color: var(--primary-color); color: white;">
+          💾 Save
+        </button>
+        <button id="mm-settings-cancel" class="mm-btn" style="flex: 1;">
+          ✕ Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('model_manager.static', filename='js/model_manager.js') }}"></script>
 </body>
 </html>

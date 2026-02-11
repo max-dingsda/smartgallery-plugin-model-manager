@@ -116,6 +116,13 @@ def detect_architecture_from_keys(metadata_keys):
 
 def scan_models(force_rescan=False):
     """Scan model folders and return list of models (incremental)"""
+    from .config import get_models_path
+    # Use the active app DB so settings saved via /settings are respected
+    db_path = current_app.config.get('MM_DATABASE_FILE', './gallery_cache.sqlite')
+    base_path = get_models_path(db_path)
+    print(f"🔍 DEBUG: Scanning models in: {base_path}")
+    print(f"🔍 DEBUG: Path exists: {os.path.exists(base_path)}")
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
 
@@ -125,7 +132,7 @@ def scan_models(force_rescan=False):
 
         for kind, folders in MODEL_SUBFOLDERS.items():
             for folder in folders:
-                folder_path = os.path.join(BASE_MODELS_PATH, folder)
+                folder_path = os.path.join(base_path, folder)
                 if not os.path.exists(folder_path):
                     continue
 
@@ -387,3 +394,150 @@ def register_routes(bp):
             })
         except Exception as e:
             return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @bp.route('/settings', methods=['GET'])
+    def api_get_settings():
+        """Get current settings."""
+        from .config import get_models_path
+
+        with get_db_connection() as conn:
+            models_path = get_models_path(conn.execute("PRAGMA database_list").fetchone()[2])
+
+            return jsonify({
+                'status': 'success',
+                'settings': {
+                    'models_path': models_path
+                }
+            })
+
+    @bp.route('/settings', methods=['POST'])
+    def api_save_settings():
+        """Save settings to database."""
+        data = request.json
+        models_path = data.get('models_path', '').strip()
+
+        if not models_path:
+            return jsonify({'status': 'error', 'message': 'Models path cannot be empty'}), 400
+
+        # Validate path exists
+        if not os.path.isdir(models_path):
+            return jsonify({'status': 'error', 'message': f'Directory not found: {models_path}'}), 400
+
+        # Save to database and clear cached models so the next /list
+        # call triggers a fresh scan of the new directory.
+        with get_db_connection() as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO mm_settings (key, value)
+                VALUES ('models_path', ?)
+            ''', (models_path,))
+            conn.execute('DELETE FROM mm_models')
+            conn.commit()
+
+        return jsonify({'status': 'success', 'message': 'Settings saved successfully'})
+
+    @bp.route('/detect-paths', methods=['GET'])
+    def api_detect_paths():
+        """Auto-detect potential model directories on all platforms."""
+        import platform
+        import string
+        from .config import MODEL_SUBFOLDERS, MODEL_EXTENSIONS
+
+        candidates = set()
+
+        # Always check relative to CWD
+        candidates.add(os.path.abspath('./models'))
+        candidates.add(os.path.abspath('../models'))
+
+        if platform.system() == 'Windows':
+            # Scan all available drive letters
+            for letter in string.ascii_uppercase:
+                drive = f'{letter}:\\'
+                if not os.path.exists(drive):
+                    continue
+
+                # Known installation patterns per drive
+                candidates.update([
+                    os.path.join(drive, 'ComfyUI', 'models'),
+                    os.path.join(drive, 'AI', 'ComfyUI', 'models'),
+                    os.path.join(drive, 'StabilityMatrix', 'Packages', 'ComfyUI', 'models'),
+                    os.path.join(drive, 'stable-diffusion', 'ComfyUI', 'models'),
+                ])
+
+                # Scan first-level directories on each drive for ComfyUI
+                try:
+                    for entry in os.scandir(drive):
+                        if not entry.is_dir():
+                            continue
+                        name_lower = entry.name.lower()
+                        # Skip system/hidden directories
+                        if name_lower.startswith(('.', '$')) or name_lower in (
+                            'windows', 'program files', 'program files (x86)',
+                            'programdata', 'recovery', 'system volume information',
+                        ):
+                            continue
+                        # Direct models folder
+                        candidates.add(os.path.join(entry.path, 'models'))
+                        # ComfyUI subfolder
+                        candidates.add(os.path.join(entry.path, 'ComfyUI', 'models'))
+                except (PermissionError, OSError):
+                    pass
+        else:
+            # Linux / macOS / Docker
+            home = os.path.expanduser('~')
+            candidates.update([
+                os.path.join(home, 'ComfyUI', 'models'),
+                os.path.join(home, 'AI', 'ComfyUI', 'models'),
+                os.path.join(home, 'stable-diffusion', 'ComfyUI', 'models'),
+            ])
+            # Common Docker / cloud mount points
+            candidates.update([
+                '/models',
+                '/app/models',
+                '/comfyui/models',
+                '/opt/ComfyUI/models',
+                '/workspace/ComfyUI/models',
+                '/workspace/models',
+            ])
+
+        # Evaluate each candidate
+        found_paths = []
+        seen = set()
+
+        for path in sorted(candidates):
+            abs_path = os.path.abspath(path)
+            if abs_path in seen:
+                continue
+            seen.add(abs_path)
+
+            if not os.path.isdir(abs_path):
+                continue
+
+            has_subfolders = False
+            model_count = 0
+
+            for subfolder in MODEL_SUBFOLDERS.keys():
+                subfolder_path = os.path.join(abs_path, subfolder)
+                if os.path.isdir(subfolder_path):
+                    has_subfolders = True
+                    try:
+                        for root, dirs, files in os.walk(subfolder_path):
+                            for f in files:
+                                if any(f.lower().endswith(ext) for ext in MODEL_EXTENSIONS):
+                                    model_count += 1
+                    except (PermissionError, OSError):
+                        pass
+
+            if has_subfolders:
+                found_paths.append({
+                    'path': abs_path,
+                    'model_count': model_count,
+                    'status': 'valid'
+                })
+
+        # Sort: most models first
+        found_paths.sort(key=lambda p: p['model_count'], reverse=True)
+
+        return jsonify({
+            'status': 'success',
+            'paths': found_paths
+        })
