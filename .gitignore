@@ -219,3 +219,10 @@ playwright/.cache/
 test_gallery.sqlite-shm
 .claude/settings.local.json
 test_gallery.sqlite-wal
+
+#new for development - not needed in production
+
+*.sqlit*
+plugins/TestPlugIn/
+
+plugins/smartgallery-plugin-model-manager/standalone_test_*
