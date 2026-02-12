@@ -137,6 +137,38 @@ function mm_modelNameWithVersion(model) {
     return `${name} - ${version}`;
 }
 
+function mm_hasCivitaiMetadata(model) {
+    const civitaiFields = [
+        model?.name_civitai,
+        model?.version_name,
+        model?.type_civitai,
+        model?.base_model,
+        model?.creator,
+        model?.license,
+        model?.civitai_model_url,
+        model?.trigger_civitai,
+        model?.tags_civitai
+    ];
+    return civitaiFields.some(mm_hasValue);
+}
+
+function mm_renderNameCell(model) {
+    const displayName = mm_escapeHtml(mm_modelNameWithVersion(model));
+    if (!mm_hasCivitaiMetadata(model)) return displayName;
+    return `
+        <span class="mm-name-with-icon">
+            <img
+                class="mm-civitai-name-icon"
+                src="https://civitai.com/favicon.ico"
+                alt="CivitAI"
+                title="CivitAI metadata fetched"
+                loading="lazy"
+            >
+            <span>${displayName}</span>
+        </span>
+    `;
+}
+
 function mm_buildCivitaiLink(model) {
     if (model.civitai_model_url) return model.civitai_model_url;
     if (model.civitaiModelId) return `https://civitai.com/models/${model.civitaiModelId}`;
@@ -490,7 +522,7 @@ function mm_renderModels(models) {
                             ${typeModels.map(model => `
                                 <tr data-model-hash="${model.hash || ''}" data-model-id="${model.id}" data-search="${mm_escapeAttr(mm_buildModelSearch(model, type, label))}">
                                     <td><input type="checkbox" class="mm-checkbox mm-select-cb" data-model-hash="${model.hash || ''}" data-model-id="${model.id}"></td>
-                                    <td>${mm_escapeHtml(mm_modelNameWithVersion(model))}</td>
+                                    <td>${mm_renderNameCell(model)}</td>
                                     <td class="mm-trigger-cell" title="${model.trigger || ''}">${model.trigger || '-'}</td>
                                     <td class="mm-tags-cell" title="${model.tags || ''}">${model.tags || '-'}</td>
                                     <td>${mm_formatSize(model.size)}</td>
@@ -518,7 +550,7 @@ function mm_renderModels(models) {
                         ${typeModels.map(model => `
                             <tr data-model-hash="${model.hash || ''}" data-model-id="${model.id}" data-search="${mm_escapeAttr(mm_buildModelSearch(model, type, label))}">
                                 <td><input type="checkbox" class="mm-checkbox mm-select-cb" data-model-hash="${model.hash || ''}" data-model-id="${model.id}"></td>
-                                <td>${mm_escapeHtml(mm_modelNameWithVersion(model))}</td>
+                                <td>${mm_renderNameCell(model)}</td>
                                 <td>${mm_formatSize(model.size)}</td>
                                 <td>${mm_formatDate(model.mtime)}</td>
                                 <td class="mm-path-cell" title="${mm_formatModelPath(model.path)}">${mm_formatModelPath(model.path)}</td>

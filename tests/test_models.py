@@ -510,3 +510,31 @@ def test_table_name_shows_name_plus_version_when_available(page: Page, test_serv
     page.goto(f"{test_server}/plugins/model_manager/")
     page.wait_for_selector(".mm-type-section", timeout=15000)
     expect(page.locator(".mm-table tbody tr td", has_text="SD XL - Refiner 1.0").first).to_be_visible()
+
+
+def test_table_name_shows_civitai_icon_when_metadata_exists(page: Page, test_server, models_dir):
+    """Rows with fetched CivitAI metadata should show a CivitAI favicon before the model name."""
+    models = _configure_and_list_models(test_server, models_dir)
+    target = next(m for m in models if m["type"] == "loras")
+    model_id = target["id"]
+
+    requests.post(
+        f"{test_server}/plugins/model_manager/update-civitai",
+        json={
+            "updates": [
+                {
+                    "modelId": model_id,
+                    "civitaiData": {
+                        "name": "Icon Test Model",
+                        "modelType": "LORA",
+                    },
+                }
+            ]
+        },
+        timeout=10,
+    ).raise_for_status()
+
+    page.goto(f"{test_server}/plugins/model_manager/")
+    page.wait_for_selector(".mm-type-section", timeout=15000)
+    icon_locator = page.locator("tr:has-text('Icon Test Model') .mm-civitai-name-icon")
+    expect(icon_locator.first).to_be_visible()

@@ -4,7 +4,7 @@ A plugin for [SmartGallery](https://github.com/biagiomaf/smart-comfyui-gallery) 
 
 ## 🚧 Development Status
 
-**Current Version:** v0.2.2
+**Current Version:** v0.2.3
 
 ![Tests](https://github.com/max-dingsda/smartgallery-plugin-model-manager/actions/workflows/test.yml/badge.svg)
 
@@ -21,7 +21,7 @@ This plugin is ready for integration but cannot be installed yet. SmartGallery's
 - **Search & Filter:** Real-time search across all model properties
 - **Batch Operations:** Select multiple models for CivitAI metadata fetching
 
-### New in v0.2.0
+### New in v0.2.x
 
 - **Model Details Overlay:** Row click opens a dedicated details overlay (checkbox click does not open it).
 - **Expanded CivitAI Metadata:** Type, base model, creator, license, model link, and version are now persisted and displayed.
@@ -29,7 +29,7 @@ This plugin is ready for integration but cannot be installed yet. SmartGallery's
 - **Type-Specific Metadata Sections:** LoRAs, Checkpoints/Diffusion Models, and Embeddings now show tailored metadata blocks.
 - **Improved Model Naming in Tables:** Name column now shows `Name - Version` when a version is available.
 - **SHA256 Usability:** Added `Copy SHA256` button in overlay instead of showing hash as plain text.
-
+- **CivitAI-Data visibility** If CivitAI-data has been successfully fetched, the CivitAI-Icon is shown in front of the respective model's name
 ## 📦 Installation
 
 **Not yet available** – requires SmartGallery plugin loader (in development).
