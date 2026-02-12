@@ -43,12 +43,122 @@ function mm_formatModelPath(path) {
 }
 
 function mm_buildModelSearch(model, type, label) {
-    const parts = [model.name, model.type || type, label, mm_formatModelPath(model.path), model.trigger, model.tags];
+    const parts = [mm_modelNameWithVersion(model), model.type || type, label, mm_formatModelPath(model.path), model.trigger, model.tags];
     return parts.filter(Boolean).join(' ').toLowerCase();
 }
 
 function mm_escapeAttr(value) {
     return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function mm_escapeHtml(value) {
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function mm_displayValue(value) {
+    if (value === null || value === undefined) return 'n/a';
+    const str = String(value).trim();
+    return str ? str : 'n/a';
+}
+
+function mm_displaySize(bytes) {
+    return typeof bytes === 'number' ? mm_formatSize(bytes) : 'n/a';
+}
+
+function mm_modelNameWithVersion(model) {
+    const name = mm_displayValue(model?.name);
+    const version = mm_displayValue(model?.version_name || model?.versionName);
+    if (name === 'n/a') return version === 'n/a' ? 'n/a' : version;
+    if (version === 'n/a') return name;
+    return `${name} - ${version}`;
+}
+
+function mm_buildCivitaiLink(model) {
+    if (model.civitai_model_url) return model.civitai_model_url;
+    if (model.civitaiModelId) return `https://civitai.com/models/${model.civitaiModelId}`;
+    return null;
+}
+
+function mm_hasValue(value) {
+    if (value === null || value === undefined) return false;
+    return String(value).trim() !== '';
+}
+
+function mm_fieldSourceBadge(source) {
+    if (source === 'local') return '<span class="mm-source-badge local" title="Local metadata">L</span>';
+    if (source === 'civitai') return '<span class="mm-source-badge civitai" title="CivitAI metadata">C</span>';
+    if (source === 'queried_none') return '<span class="mm-source-badge queried-none" title="CivitAI queried, no value available">Ø</span>';
+    return '';
+}
+
+function mm_sourceForField(model, fieldName) {
+    const civitaiChecked = !!model.civitai_checked_at;
+
+    if (fieldName === 'name') {
+        if (mm_hasValue(model.name_civitai)) return 'civitai';
+        if (mm_hasValue(model.name_local)) return 'local';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'type') {
+        if (mm_hasValue(model.type_civitai)) return 'civitai';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'base_model') {
+        if (mm_hasValue(model.base_model)) return 'civitai';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'creator') {
+        if (mm_hasValue(model.creator)) return 'civitai';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'license') {
+        if (mm_hasValue(model.license)) return 'civitai';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'civitai_link') {
+        if (mm_hasValue(mm_buildCivitaiLink(model))) return 'civitai';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'path' || fieldName === 'size') return 'local';
+    if (fieldName === 'trigger') {
+        if (mm_hasValue(model.trigger_civitai)) return 'civitai';
+        if (mm_hasValue(model.trigger_local)) return 'local';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    if (fieldName === 'tags') {
+        if (mm_hasValue(model.tags_civitai)) return 'civitai';
+        if (mm_hasValue(model.tags_local)) return 'local';
+        return civitaiChecked ? 'queried_none' : '';
+    }
+    return '';
+}
+
+function mm_renderDetailRows(rows) {
+    return rows.map(row => {
+        const valueHtml = row.isHtml ? row.value : mm_escapeHtml(mm_displayValue(row.value));
+        const sourceBadge = mm_fieldSourceBadge(row.source);
+        return `
+            <div class="mm-key">${mm_escapeHtml(row.key)}</div>
+            <div class="mm-value">${valueHtml}${sourceBadge}</div>
+        `;
+    }).join('');
+}
+
+async function mm_copyModelSha256(modelId) {
+    const model = mm_modelsById[modelId];
+    const status = document.getElementById('mm-copy-sha-status');
+    if (!model || !model.hash) {
+        if (status) status.textContent = 'n/a';
+        return;
+    }
+
+    try {
+        await navigator.clipboard.writeText(model.hash);
+        if (status) status.textContent = 'Copied';
+    } catch (error) {
+        console.error('Failed to copy SHA256:', error);
+        if (status) status.textContent = 'Copy failed';
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +189,10 @@ function mm_applySearch(rawQuery) {
 // ---------------------------------------------------------------------------
 // 5. Load Models
 // ---------------------------------------------------------------------------
+let mm_loadModelsRequestId = 0;
+
 async function mm_loadModels() {
+    const requestId = ++mm_loadModelsRequestId;
     const loading = document.getElementById('mm-loading');
     const content = document.getElementById('mm-content');
 
@@ -89,6 +202,9 @@ async function mm_loadModels() {
     try {
         const response = await fetch('/plugins/model_manager/list');
         const data = await response.json();
+
+        // Ignore stale responses from earlier requests.
+        if (requestId !== mm_loadModelsRequestId) return;
 
         if (loading) loading.style.display = 'none';
 
@@ -131,6 +247,7 @@ async function mm_loadModels() {
             }
         }
     } catch (error) {
+        if (requestId !== mm_loadModelsRequestId) return;
         console.error('Failed to load models:', error);
         if (loading) loading.style.display = 'none';
     }
@@ -139,9 +256,132 @@ async function mm_loadModels() {
 // ---------------------------------------------------------------------------
 // 6. Render Models
 // ---------------------------------------------------------------------------
+let mm_modelsById = {};
+
+function mm_openModelDetails(modelId) {
+    const model = mm_modelsById[modelId];
+    if (!model) return;
+
+    const overlay = document.getElementById('mm-model-overlay');
+    const content = document.getElementById('mm-model-overlay-content');
+    if (!overlay || !content) return;
+
+    const civitaiLink = mm_buildCivitaiLink(model);
+    const baseInfo = [
+        { key: 'Name', value: model.name, source: mm_sourceForField(model, 'name') },
+        { key: 'Type', value: model.type_civitai, source: mm_sourceForField(model, 'type') },
+        { key: 'Base Model', value: model.base_model || model.baseModel, source: mm_sourceForField(model, 'base_model') },
+        { key: 'Creator/Username', value: model.creator || model.username, source: mm_sourceForField(model, 'creator') },
+        { key: 'Local Path', value: mm_formatModelPath(model.path), source: mm_sourceForField(model, 'path') },
+        { key: 'Local Size', value: mm_displaySize(model.size), source: mm_sourceForField(model, 'size') },
+        { key: 'License', value: model.license, source: mm_sourceForField(model, 'license') },
+        {
+            key: 'CivitAI',
+            value: civitaiLink ? `<a href="${mm_escapeAttr(civitaiLink)}" target="_blank" rel="noopener noreferrer">${mm_escapeHtml(civitaiLink)}</a>` : 'n/a',
+            source: mm_sourceForField(model, 'civitai_link'),
+            isHtml: true
+        }
+    ];
+
+    let typeSpecificHtml = '';
+    if (model.type === 'loras') {
+        typeSpecificHtml = `
+            <div class="mm-detail-section">
+                <h4>LoRA Metadata</h4>
+                <div class="mm-detail-grid">
+                    ${mm_renderDetailRows([
+                        { key: 'Trigger', value: model.trigger, source: mm_sourceForField(model, 'trigger') },
+                        { key: 'Tags', value: model.tags, source: mm_sourceForField(model, 'tags') }
+                    ])}
+                </div>
+            </div>
+        `;
+    } else if (model.type === 'checkpoints' || model.type === 'diffusion_models') {
+        typeSpecificHtml = `
+            <div class="mm-detail-section">
+                <h4>Checkpoint Metadata</h4>
+                <div class="mm-detail-grid">
+                    <div class="mm-key">Version</div><div class="mm-value">${mm_escapeHtml(mm_displayValue(model.version_name || model.versionName))}</div>
+                    <div class="mm-key">Model Family</div><div class="mm-value">${mm_escapeHtml(mm_displayValue(model.base_model || model.baseModel))}</div>
+                </div>
+            </div>
+        `;
+    } else if (model.type === 'embeddings') {
+        typeSpecificHtml = `
+            <div class="mm-detail-section">
+                <h4>Embedding Metadata</h4>
+                <div class="mm-detail-grid">
+                    ${mm_renderDetailRows([
+                        { key: 'Activation Text', value: model.trigger, source: mm_sourceForField(model, 'trigger') }
+                    ])}
+                </div>
+            </div>
+        `;
+    }
+
+    const metadataHtml = `
+        ${typeSpecificHtml}
+        <div class="mm-detail-section">
+            <div class="mm-detail-actions">
+                <button
+                    id="mm-copy-sha-btn"
+                    class="mm-btn"
+                    type="button"
+                    ${model.hash ? '' : 'disabled'}
+                    data-model-id="${mm_escapeAttr(model.id)}"
+                >
+                    Copy SHA256
+                </button>
+                <span id="mm-copy-sha-status" class="mm-copy-status">${model.hash ? 'Ready' : 'n/a'}</span>
+            </div>
+        </div>
+    `;
+
+    content.innerHTML = `
+        <div class="mm-detail-grid">
+            ${mm_renderDetailRows(baseInfo)}
+        </div>
+        ${metadataHtml}
+    `;
+
+    const copyBtn = document.getElementById('mm-copy-sha-btn');
+    if (copyBtn) {
+        copyBtn.addEventListener('click', () => mm_copyModelSha256(copyBtn.dataset.modelId));
+    }
+
+    overlay.style.display = 'flex';
+}
+
+function mm_closeModelDetails() {
+    const overlay = document.getElementById('mm-model-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function mm_setupModelRowClicks() {
+    document.querySelectorAll('#mm-content tbody tr[data-model-id]').forEach(row => {
+        row.classList.add('mm-model-row');
+        row.tabIndex = 0;
+
+        row.addEventListener('click', event => {
+            if (event.target.closest('input, button, a, label')) return;
+            mm_openModelDetails(row.dataset.modelId);
+        });
+
+        row.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                mm_openModelDetails(row.dataset.modelId);
+            }
+        });
+    });
+}
+
 function mm_renderModels(models) {
     const content = document.getElementById('mm-content');
     if (!content) return;
+
+    mm_modelsById = {};
+    models.forEach(model => { mm_modelsById[model.id] = model; });
 
     // Group by type
     const grouped = {};
@@ -179,7 +419,7 @@ function mm_renderModels(models) {
                             ${typeModels.map(model => `
                                 <tr data-model-hash="${model.hash || ''}" data-model-id="${model.id}" data-search="${mm_escapeAttr(mm_buildModelSearch(model, type, label))}">
                                     <td><input type="checkbox" class="mm-checkbox mm-select-cb" data-model-hash="${model.hash || ''}" data-model-id="${model.id}"></td>
-                                    <td>${model.name}</td>
+                                    <td>${mm_escapeHtml(mm_modelNameWithVersion(model))}</td>
                                     <td class="mm-trigger-cell" title="${model.trigger || ''}">${model.trigger || '-'}</td>
                                     <td class="mm-tags-cell" title="${model.tags || ''}">${model.tags || '-'}</td>
                                     <td>${mm_formatSize(model.size)}</td>
@@ -207,7 +447,7 @@ function mm_renderModels(models) {
                         ${typeModels.map(model => `
                             <tr data-model-hash="${model.hash || ''}" data-model-id="${model.id}" data-search="${mm_escapeAttr(mm_buildModelSearch(model, type, label))}">
                                 <td><input type="checkbox" class="mm-checkbox mm-select-cb" data-model-hash="${model.hash || ''}" data-model-id="${model.id}"></td>
-                                <td>${model.name}</td>
+                                <td>${mm_escapeHtml(mm_modelNameWithVersion(model))}</td>
                                 <td>${mm_formatSize(model.size)}</td>
                                 <td>${mm_formatDate(model.mtime)}</td>
                                 <td class="mm-path-cell" title="${mm_formatModelPath(model.path)}">${mm_formatModelPath(model.path)}</td>
@@ -219,6 +459,7 @@ function mm_renderModels(models) {
     }).join('');
 
     mm_setupSelectAll();
+    mm_setupModelRowClicks();
     mm_applySearch(mm_getSearchValue());
 }
 
@@ -282,6 +523,28 @@ async function mm_fetchCivitAI() {
     const total = mm_selectedModels.length;
     const successfulModels = [];
     const failedModels = [];
+    const civitaiUpdates = [];
+    const modelInfoCache = {};
+
+    function mm_buildLicenseSummary(modelData) {
+        if (!modelData) return '';
+        if (modelData.license) return String(modelData.license);
+
+        const parts = [];
+        if (modelData.allowCommercialUse !== undefined && modelData.allowCommercialUse !== null) {
+            parts.push(`Commercial: ${String(modelData.allowCommercialUse)}`);
+        }
+        if (modelData.allowNoCredit !== undefined && modelData.allowNoCredit !== null) {
+            parts.push(`NoCredit: ${modelData.allowNoCredit ? 'yes' : 'no'}`);
+        }
+        if (modelData.allowDerivatives !== undefined && modelData.allowDerivatives !== null) {
+            parts.push(`Derivatives: ${modelData.allowDerivatives ? 'yes' : 'no'}`);
+        }
+        if (modelData.allowDifferentLicense !== undefined && modelData.allowDifferentLicense !== null) {
+            parts.push(`Relicense: ${modelData.allowDifferentLicense ? 'yes' : 'no'}`);
+        }
+        return parts.join(' | ');
+    }
 
     // Cancel handler
     cancelBtn.onclick = function() {
@@ -353,17 +616,63 @@ async function mm_fetchCivitAI() {
 
             if (response.ok) {
                 const data = await response.json();
+                let modelDetails = null;
+
+                if (data.modelId) {
+                    if (modelInfoCache[data.modelId] !== undefined) {
+                        modelDetails = modelInfoCache[data.modelId];
+                    } else {
+                        try {
+                            const modelResponse = await fetch(`https://civitai.com/api/v1/models/${data.modelId}`, {
+                                signal: mm_abortController.signal
+                            });
+                            modelDetails = modelResponse.ok ? await modelResponse.json() : null;
+                        } catch (modelError) {
+                            if (modelError.name === 'AbortError') return;
+                            console.warn(`Model details request failed for ${data.modelId}:`, modelError.message);
+                            modelDetails = null;
+                        }
+                        modelInfoCache[data.modelId] = modelDetails;
+                    }
+                }
 
                 let triggerWords = data.trainedWords || data.triggers || data.activationText || data.triggerWords || [];
                 const triggerString = Array.isArray(triggerWords) ? triggerWords.join(', ') : (triggerWords || '');
+                const creatorUsername = modelDetails?.creator?.username || data.model?.creator?.username || data.model?.user?.username || '';
+                const licenseValue = mm_buildLicenseSummary(modelDetails) || data.model?.license || data.license || '';
+                const modelType = data.model?.type || modelDetails?.type || '';
 
                 successfulModels.push({
                     modelId: model.id,
                     civitaiData: {
                         name: data.model?.name || '',
+                        modelType,
+                        baseModel: data.baseModel || data.model?.baseModel || '',
+                        creatorUsername,
+                        license: licenseValue,
+                        civitaiModelUrl: data.modelId ? `https://civitai.com/models/${data.modelId}?modelVersionId=${data.id}` : '',
                         versionName: data.name || '',
                         description: data.description || '',
-                        tags: triggerString,
+                        triggerWords: triggerString,
+                        modelTags: Array.isArray(data.model?.tags) ? data.model.tags.join(', ') : (data.model?.tags || ''),
+                        thumbnailUrl: data.images?.[0]?.url || '',
+                        civitaiModelId: data.modelId,
+                        civitaiVersionId: data.id
+                    }
+                });
+                civitaiUpdates.push({
+                    modelId: model.id,
+                    civitaiData: {
+                        name: data.model?.name || '',
+                        modelType,
+                        baseModel: data.baseModel || data.model?.baseModel || '',
+                        creatorUsername,
+                        license: licenseValue,
+                        civitaiModelUrl: data.modelId ? `https://civitai.com/models/${data.modelId}?modelVersionId=${data.id}` : '',
+                        versionName: data.name || '',
+                        description: data.description || '',
+                        triggerWords: triggerString,
+                        modelTags: Array.isArray(data.model?.tags) ? data.model.tags.join(', ') : (data.model?.tags || ''),
                         thumbnailUrl: data.images?.[0]?.url || '',
                         civitaiModelId: data.modelId,
                         civitaiVersionId: data.id
@@ -371,6 +680,13 @@ async function mm_fetchCivitAI() {
                 });
             } else {
                 failedModels.push({ model, reason: `HTTP ${response.status}` });
+                if (response.status === 404) {
+                    civitaiUpdates.push({
+                        modelId: model.id,
+                        civitaiData: {},
+                        civitaiNotFound: true
+                    });
+                }
             }
         } catch (error) {
             if (error.name === 'AbortError') return;
@@ -396,11 +712,11 @@ async function mm_fetchCivitAI() {
         mm_showNotification(message, successfulModels.length === total ? 'success' : 'info');
 
         // Save to backend
-        if (successfulModels.length > 0) {
+        if (civitaiUpdates.length > 0) {
             fetch('/plugins/model_manager/update-civitai', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ updates: successfulModels })
+                body: JSON.stringify({ updates: civitaiUpdates })
             })
             .then(r => r.json())
             .then(data => {
@@ -600,6 +916,20 @@ document.addEventListener('DOMContentLoaded', function() {
             if (searchInput) searchInput.focus();
         });
     }
+
+    // Model details overlay
+    const modelOverlay = document.getElementById('mm-model-overlay');
+    const modelOverlayClose = document.getElementById('mm-model-overlay-close');
+    if (modelOverlayClose) modelOverlayClose.addEventListener('click', mm_closeModelDetails);
+    if (modelOverlay) {
+        modelOverlay.addEventListener('click', event => {
+            if (event.target === modelOverlay) mm_closeModelDetails();
+        });
+    }
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') mm_closeModelDetails();
+    });
 
     // Initial load
     mm_loadModels();

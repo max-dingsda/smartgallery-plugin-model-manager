@@ -114,6 +114,15 @@ def detect_architecture_from_keys(metadata_keys):
     return 'Unknown'
 
 
+def pick_effective_value(civitai_value, local_value, legacy_value=None):
+    """Pick effective display value with CivitAI priority and local fallback."""
+    if civitai_value:
+        return civitai_value
+    if local_value:
+        return local_value
+    return legacy_value
+
+
 def scan_models(force_rescan=False):
     """Scan model folders and return list of models (incremental)"""
     from .config import get_models_path
@@ -148,55 +157,157 @@ def scan_models(force_rescan=False):
                             file_stat = os.stat(full_path)
                             file_mtime = int(file_stat.st_mtime)
                             file_size = file_stat.st_size
+                            local_name = os.path.splitext(file)[0]
 
                             model_id = fast_model_id(full_path)
 
-                            cursor.execute("SELECT mtime, hash, trigger, tags FROM mm_models WHERE id = ?", (model_id,))
+                            cursor.execute("""
+                                SELECT
+                                    mtime, hash, name, trigger, tags,
+                                    name_local, name_civitai, version_civitai, type_civitai,
+                                    base_model_civitai, creator_civitai, license_civitai, civitai_model_url,
+                                    civitai_checked_at,
+                                    trigger_local, trigger_civitai,
+                                    tags_local, tags_civitai
+                                FROM mm_models
+                                WHERE id = ?
+                            """, (model_id,))
                             existing = cursor.fetchone()
 
                             if existing and not force_rescan:
                                 if existing[0] == file_mtime:
+                                    existing_hash = existing[1]
+                                    legacy_name, legacy_trigger, legacy_tags = existing[2], existing[3], existing[4]
+                                    name_local, name_civitai = existing[5], existing[6]
+                                    version_civitai = existing[7]
+                                    type_civitai = existing[8]
+                                    base_model_civitai, creator_civitai, license_civitai, civitai_model_url = existing[9], existing[10], existing[11], existing[12]
+                                    civitai_checked_at = existing[13]
+                                    trigger_local, trigger_civitai = existing[14], existing[15]
+                                    tags_local, tags_civitai = existing[16], existing[17]
+
+                                    # Backfill local columns for older rows if needed.
+                                    if not name_local:
+                                        name_local = local_name
+                                        cursor.execute("UPDATE mm_models SET name_local = ? WHERE id = ?", (name_local, model_id))
+
+                                    effective_name = pick_effective_value(name_civitai, name_local, legacy_name)
+                                    effective_trigger = pick_effective_value(trigger_civitai, trigger_local, legacy_trigger)
+                                    effective_tags = pick_effective_value(tags_civitai, tags_local, legacy_tags)
+
                                     found_models.append({
                                         'id': model_id,
                                         'type': kind,
-                                        'name': os.path.splitext(file)[0],
+                                        'name': effective_name,
                                         'path': full_path,
                                         'size': file_size,
-                                        'hash': existing[1],
+                                        'hash': existing_hash,
                                         'mtime': file_mtime,
-                                        'trigger': existing[2],
-                                        'tags': existing[3]
+                                        'trigger': effective_trigger,
+                                        'tags': effective_tags,
+                                        'name_local': name_local,
+                                        'name_civitai': name_civitai,
+                                        'version_name': version_civitai,
+                                        'type_civitai': type_civitai,
+                                        'base_model': base_model_civitai,
+                                        'creator': creator_civitai,
+                                        'license': license_civitai,
+                                        'civitai_model_url': civitai_model_url,
+                                        'civitai_checked_at': civitai_checked_at,
+                                        'trigger_local': trigger_local,
+                                        'trigger_civitai': trigger_civitai,
+                                        'tags_local': tags_local,
+                                        'tags_civitai': tags_civitai
                                     })
                                     continue
 
-                            trigger, tags = extract_safetensors_metadata(full_path)
+                            trigger_local, tags_local = extract_safetensors_metadata(full_path)
+                            name_civitai = None
+                            version_civitai = None
+                            type_civitai = None
+                            base_model_civitai = None
+                            creator_civitai = None
+                            license_civitai = None
+                            civitai_model_url = None
+                            civitai_checked_at = None
+                            trigger_civitai = None
+                            tags_civitai = None
+                            existing_hash = None
+
+                            if existing:
+                                name_civitai = existing[6]
+                                version_civitai = existing[7]
+                                type_civitai = existing[8]
+                                base_model_civitai = existing[9]
+                                creator_civitai = existing[10]
+                                license_civitai = existing[11]
+                                civitai_model_url = existing[12]
+                                civitai_checked_at = existing[13]
+                                trigger_civitai = existing[15]
+                                tags_civitai = existing[17]
+                                existing_hash = existing[1]
+
+                            effective_name = pick_effective_value(name_civitai, local_name)
+                            effective_trigger = pick_effective_value(trigger_civitai, trigger_local)
+                            effective_tags = pick_effective_value(tags_civitai, tags_local)
 
                             cursor.execute("""
-                                INSERT OR REPLACE INTO mm_models (id, type, name, path, size, hash, mtime, scanned_at, trigger, tags)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                INSERT OR REPLACE INTO mm_models (
+                                    id, type, name, path, size, hash, mtime, scanned_at, trigger, tags,
+                                    name_local, name_civitai, version_civitai, type_civitai, base_model_civitai, creator_civitai, license_civitai, civitai_model_url,
+                                    civitai_checked_at,
+                                    trigger_local, trigger_civitai, tags_local, tags_civitai
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 model_id,
                                 kind,
-                                os.path.splitext(file)[0],
+                                effective_name,
                                 full_path,
                                 file_size,
-                                None,
+                                existing_hash,
                                 file_mtime,
                                 current_time,
-                                trigger,
-                                tags
+                                effective_trigger,
+                                effective_tags,
+                                local_name,
+                                name_civitai,
+                                version_civitai,
+                                type_civitai,
+                                base_model_civitai,
+                                creator_civitai,
+                                license_civitai,
+                                civitai_model_url,
+                                civitai_checked_at,
+                                trigger_local,
+                                trigger_civitai,
+                                tags_local,
+                                tags_civitai
                             ))
 
                             found_models.append({
                                 'id': model_id,
                                 'type': kind,
-                                'name': os.path.splitext(file)[0],
+                                'name': effective_name,
                                 'path': full_path,
                                 'size': file_size,
-                                'hash': None,
+                                'hash': existing_hash,
                                 'mtime': file_mtime,
-                                'trigger': trigger,
-                                'tags': tags
+                                'trigger': effective_trigger,
+                                'tags': effective_tags,
+                                'name_local': local_name,
+                                'name_civitai': name_civitai,
+                                'version_name': version_civitai,
+                                'type_civitai': type_civitai,
+                                'base_model': base_model_civitai,
+                                'creator': creator_civitai,
+                                'license': license_civitai,
+                                'civitai_model_url': civitai_model_url,
+                                'civitai_checked_at': civitai_checked_at,
+                                'trigger_local': trigger_local,
+                                'trigger_civitai': trigger_civitai,
+                                'tags_local': tags_local,
+                                'tags_civitai': tags_civitai
                             })
 
                         except Exception as e:
@@ -271,7 +382,11 @@ def register_routes(bp):
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, type, name, path, size, hash, mtime, trigger, tags
+                    SELECT
+                        id, type, name, path, size, hash, mtime, trigger, tags,
+                        name_local, name_civitai, version_civitai, type_civitai, base_model_civitai, creator_civitai, license_civitai, civitai_model_url,
+                        civitai_checked_at,
+                        trigger_local, trigger_civitai, tags_local, tags_civitai
                     FROM mm_models
                     ORDER BY type, name COLLATE NOCASE
                 """)
@@ -281,13 +396,26 @@ def register_routes(bp):
                     models.append({
                         'id': row[0],
                         'type': row[1],
-                        'name': row[2],
+                        'name': pick_effective_value(row[10], row[9], row[2]),
                         'path': row[3],
                         'size': row[4],
                         'hash': row[5],
                         'mtime': row[6],
-                        'trigger': row[7],
-                        'tags': row[8]
+                        'trigger': pick_effective_value(row[19], row[18], row[7]),
+                        'tags': pick_effective_value(row[21], row[20], row[8]),
+                        'name_local': row[9],
+                        'name_civitai': row[10],
+                        'version_name': row[11],
+                        'type_civitai': row[12],
+                        'base_model': row[13],
+                        'creator': row[14],
+                        'license': row[15],
+                        'civitai_model_url': row[16],
+                        'civitai_checked_at': row[17],
+                        'trigger_local': row[18],
+                        'trigger_civitai': row[19],
+                        'tags_local': row[20],
+                        'tags_civitai': row[21]
                     })
 
             return jsonify({
@@ -313,24 +441,91 @@ def register_routes(bp):
                 for update in data['updates']:
                     model_id = update.get('modelId')
                     civitai_data = update.get('civitaiData', {})
+                    civitai_not_found = bool(update.get('civitaiNotFound', False))
 
                     if not model_id:
                         continue
 
-                    # Extract trigger and tags from CivitAI data
-                    trigger = civitai_data.get('tags', '') or None
-                    # Store the full name (model + version) in tags field for reference
-                    tags = f"{civitai_data.get('name', '')} - {civitai_data.get('versionName', '')}".strip(' -') or None
-                    # Use CivitAI model name as the display name
-                    model_name = civitai_data.get('name', '') or None
+                    civitai_checked_at = int(time.time())
 
-                    print(f"Updating model {model_id}: name='{model_name}', trigger='{trigger}', tags='{tags}'")
+                    if civitai_not_found:
+                        cursor.execute("""
+                            UPDATE mm_models
+                            SET civitai_checked_at = ?
+                            WHERE id = ?
+                        """, (civitai_checked_at, model_id))
+                        if cursor.rowcount > 0:
+                            updated_count += 1
+                        continue
+
+                    model_name_civitai = civitai_data.get('name', '') or None
+                    version_civitai = civitai_data.get('versionName', '') or None
+                    type_civitai = civitai_data.get('modelType', '') or None
+                    base_model_civitai = civitai_data.get('baseModel', '') or None
+                    creator_civitai = civitai_data.get('creatorUsername', '') or civitai_data.get('creator', '') or None
+                    license_civitai = civitai_data.get('license', '') or None
+                    civitai_model_url = civitai_data.get('civitaiModelUrl', '') or None
+                    trigger_civitai = civitai_data.get('triggerWords', '') or civitai_data.get('tags', '') or None
+                    tags_civitai = civitai_data.get('modelTags', '') or None
+
+                    # Keep legacy effective columns in sync for compatibility.
+                    cursor.execute("""
+                        SELECT name_local, trigger_local, tags_local, name, trigger, tags
+                        FROM mm_models
+                        WHERE id = ?
+                    """, (model_id,))
+                    existing = cursor.fetchone()
+                    if not existing:
+                        continue
+
+                    local_name, local_trigger, local_tags = existing[0], existing[1], existing[2]
+                    legacy_name, legacy_trigger, legacy_tags = existing[3], existing[4], existing[5]
+
+                    effective_name = pick_effective_value(model_name_civitai, local_name, legacy_name)
+                    effective_trigger = pick_effective_value(trigger_civitai, local_trigger, legacy_trigger)
+                    effective_tags = pick_effective_value(tags_civitai, local_tags, legacy_tags)
+
+                    print(
+                        f"Updating model {model_id}: "
+                        f"name_civitai='{model_name_civitai}', version_civitai='{version_civitai}', type_civitai='{type_civitai}', "
+                        f"base_model_civitai='{base_model_civitai}', creator_civitai='{creator_civitai}', "
+                        f"license_civitai='{license_civitai}', civitai_model_url='{civitai_model_url}', "
+                        f"trigger_civitai='{trigger_civitai}', tags_civitai='{tags_civitai}'"
+                    )
 
                     cursor.execute("""
                         UPDATE mm_models
-                        SET name = ?, trigger = ?, tags = ?
+                        SET
+                            name_civitai = ?,
+                            version_civitai = ?,
+                            type_civitai = ?,
+                            base_model_civitai = ?,
+                            creator_civitai = ?,
+                            license_civitai = ?,
+                            civitai_model_url = ?,
+                            civitai_checked_at = ?,
+                            trigger_civitai = ?,
+                            tags_civitai = ?,
+                            name = ?,
+                            trigger = ?,
+                            tags = ?
                         WHERE id = ?
-                    """, (model_name, trigger, tags, model_id))
+                    """, (
+                        model_name_civitai,
+                        version_civitai,
+                        type_civitai,
+                        base_model_civitai,
+                        creator_civitai,
+                        license_civitai,
+                        civitai_model_url,
+                        civitai_checked_at,
+                        trigger_civitai,
+                        tags_civitai,
+                        effective_name,
+                        effective_trigger,
+                        effective_tags,
+                        model_id
+                    ))
 
                     if cursor.rowcount > 0:
                         updated_count += 1

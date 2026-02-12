@@ -41,9 +41,45 @@ def _init_database(app):
             mtime INTEGER NOT NULL,
             scanned_at INTEGER NOT NULL,
             trigger TEXT,
-            tags TEXT
+            tags TEXT,
+            name_local TEXT,
+            name_civitai TEXT,
+            version_civitai TEXT,
+            type_civitai TEXT,
+            base_model_civitai TEXT,
+            creator_civitai TEXT,
+            license_civitai TEXT,
+            civitai_model_url TEXT,
+            civitai_checked_at INTEGER,
+            trigger_local TEXT,
+            trigger_civitai TEXT,
+            tags_local TEXT,
+            tags_civitai TEXT
         )
     ''')
+
+    # Lightweight schema migration for existing installs.
+    existing_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(mm_models)").fetchall()
+    }
+    required_cols = {
+        "name_local": "TEXT",
+        "name_civitai": "TEXT",
+        "version_civitai": "TEXT",
+        "type_civitai": "TEXT",
+        "base_model_civitai": "TEXT",
+        "creator_civitai": "TEXT",
+        "license_civitai": "TEXT",
+        "civitai_model_url": "TEXT",
+        "civitai_checked_at": "INTEGER",
+        "trigger_local": "TEXT",
+        "trigger_civitai": "TEXT",
+        "tags_local": "TEXT",
+        "tags_civitai": "TEXT",
+    }
+    for col, col_type in required_cols.items():
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE mm_models ADD COLUMN {col} {col_type}")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mm_models_type ON mm_models(type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_mm_models_mtime ON mm_models(mtime)")
 

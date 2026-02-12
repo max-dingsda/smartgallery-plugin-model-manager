@@ -88,4 +88,4 @@ if __name__ == '__main__':
     print("    http://127.0.0.1:5001/plugins/model_manager/list")
     print("=" * 60)
 
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False, use_reloader=False)

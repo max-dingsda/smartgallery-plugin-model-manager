@@ -77,6 +77,8 @@
   }
   .mm-btn:hover { background: var(--surface-hover); border-color: var(--text-muted); transform: translateY(-1px); }
   .mm-btn:active { transform: translateY(0); }
+  .mm-btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+  .mm-btn:disabled:hover { background: var(--glass-bg); border-color: var(--glass-border); transform: none; }
   .mm-btn.clear { width: 42px; padding: 0; }
   .mm-btn.danger { background: var(--danger-color); border-color: var(--danger-color); color: #fff; width: 100%; }
 
@@ -94,6 +96,7 @@
   .mm-table th { padding: 12px; text-align: left; color: #fff; font-weight: 600; }
   .mm-table tbody tr { border-bottom: 1px solid #3a3a3a; }
   .mm-table tbody tr:hover { background: #333; }
+  .mm-table tbody tr.mm-model-row { cursor: pointer; }
   .mm-table td { padding: 12px; color: #ddd; }
 
   /* --- Special Cells --- */
@@ -121,6 +124,36 @@
   #mm-civitai-status { margin: 0 0 15px 0; color: var(--text-color); }
   .mm-progress-track { background: rgba(0,0,0,0.3); height: 24px; border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
   #mm-civitai-progress { background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s ease; }
+  .mm-overlay-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .mm-overlay-head h3 { margin: 0; }
+  .mm-source-legend { display: flex; flex-wrap: wrap; gap: 10px; margin: -6px 0 12px 0; }
+  .mm-source-legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.8rem; }
+  .mm-overlay-close {
+    width: 34px; height: 34px; border-radius: 8px; font-size: 1rem;
+    background: var(--glass-bg); border: 1px solid var(--glass-border); color: var(--text-color); cursor: pointer;
+  }
+  .mm-overlay-close:hover { background: var(--surface-hover); }
+  .mm-detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 10px 14px; font-size: 0.92rem; }
+  .mm-detail-grid .mm-key { color: var(--text-muted); font-weight: 600; }
+  .mm-detail-grid .mm-value { color: var(--text-color); word-break: break-word; }
+  .mm-source-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; margin-left: 8px; padding: 0 4px;
+    border-radius: 999px; font-size: 0.7rem; font-weight: 700; line-height: 1;
+    border: 1px solid transparent; vertical-align: middle;
+  }
+  .mm-source-badge.local { color: #b8d5ff; border-color: #4a9eff; background: rgba(74,158,255,0.2); }
+  .mm-source-badge.civitai { color: #b8ffd7; border-color: #36c07a; background: rgba(54,192,122,0.2); }
+  .mm-source-badge.queried-none { color: #ffe2a8; border-color: #d09a36; background: rgba(208,154,54,0.2); }
+  .mm-detail-grid .mm-value a,
+  .mm-detail-grid .mm-value a:visited { color: #7ec3ff; text-decoration: underline; text-underline-offset: 2px; }
+  .mm-detail-grid .mm-value a:hover,
+  .mm-detail-grid .mm-value a:focus { color: #a6d8ff; }
+  .mm-detail-section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--glass-border); }
+  .mm-detail-section h4 { margin: 0 0 8px 0; font-size: 0.95rem; color: var(--primary-color); }
+  .mm-detail-empty { color: var(--text-muted); font-size: 0.9rem; }
+  .mm-detail-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
+  .mm-copy-status { font-size: 0.85rem; color: var(--text-muted); }
 
   /* --- Notification Toast --- */
   #mm-notifications { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
@@ -167,6 +200,22 @@
         <div id="mm-civitai-progress"></div>
       </div>
       <button id="mm-civitai-cancel" class="mm-btn danger">✕ Cancel</button>
+    </div>
+  </div>
+
+  <!-- Model Details Overlay -->
+  <div id="mm-model-overlay" class="mm-overlay" style="display:none;">
+    <div class="mm-overlay-box">
+      <div class="mm-overlay-head">
+        <h3>Model Details</h3>
+        <button id="mm-model-overlay-close" class="mm-overlay-close" type="button" aria-label="Close model details">✕</button>
+      </div>
+      <div class="mm-source-legend" aria-label="Metadata source legend">
+        <span class="mm-source-legend-item"><span class="mm-source-badge local">L</span>Local</span>
+        <span class="mm-source-legend-item"><span class="mm-source-badge civitai">C</span>CivitAI</span>
+        <span class="mm-source-legend-item"><span class="mm-source-badge queried-none">Ø</span>CivitAI queried, no value</span>
+      </div>
+      <div id="mm-model-overlay-content"></div>
     </div>
   </div>
 
