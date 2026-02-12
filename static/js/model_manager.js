@@ -15,6 +15,70 @@ function mm_showNotification(message, type = 'info', duration = 5000) {
     setTimeout(() => toast.remove(), duration);
 }
 
+function mm_resolveApiBase() {
+    const script = Array.from(document.querySelectorAll('script[src]')).find(s =>
+        s.src && s.src.includes('/plugins/model_manager/static/js/model_manager.js')
+    );
+    if (script) {
+        try {
+            const url = new URL(script.src, window.location.origin);
+            return url.pathname.replace('/static/js/model_manager.js', '');
+        } catch (error) {
+            console.warn('Failed to resolve API base from script URL:', error);
+        }
+    }
+    return '/plugins/model_manager';
+}
+
+const mm_apiBase = mm_resolveApiBase();
+
+function mm_apiUrl(path) {
+    const clean = String(path || '').replace(/^\/+/, '');
+    return `${mm_apiBase}/${clean}`;
+}
+
+async function mm_readJsonResponse(response, context = 'Request') {
+    const contentType = response.headers.get('content-type') || '';
+    const isJson = contentType.includes('application/json');
+
+    if (!response.ok) {
+        let detail = '';
+        if (isJson) {
+            try {
+                const err = await response.json();
+                detail = err?.message || JSON.stringify(err);
+            } catch (_) {
+                detail = '';
+            }
+        } else {
+            try {
+                const text = await response.text();
+                detail = text ? text.replace(/\s+/g, ' ').slice(0, 200) : '';
+            } catch (_) {
+                detail = '';
+            }
+        }
+        throw new Error(`${context}: HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
+    }
+
+    if (!isJson) {
+        let preview = '';
+        try {
+            const text = await response.text();
+            preview = text ? text.replace(/\s+/g, ' ').slice(0, 200) : '';
+        } catch (_) {
+            preview = '';
+        }
+        throw new Error(`${context}: Expected JSON but got '${contentType || 'unknown'}'${preview ? ` - ${preview}` : ''}`);
+    }
+
+    try {
+        return await response.json();
+    } catch (error) {
+        throw new Error(`${context}: Invalid JSON response`);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 2. Entry point — called by SmartGallery plugin loader menu button
 // ---------------------------------------------------------------------------
@@ -200,8 +264,8 @@ async function mm_loadModels() {
     if (content) content.innerHTML = '';
 
     try {
-        const response = await fetch('/plugins/model_manager/list');
-        const data = await response.json();
+        const response = await fetch(mm_apiUrl('list'));
+        const data = await mm_readJsonResponse(response, 'Load models');
 
         // Ignore stale responses from earlier requests.
         if (requestId !== mm_loadModelsRequestId) return;
@@ -250,6 +314,13 @@ async function mm_loadModels() {
         if (requestId !== mm_loadModelsRequestId) return;
         console.error('Failed to load models:', error);
         if (loading) loading.style.display = 'none';
+        if (content) {
+            content.innerHTML = `
+                <div style="padding: 24px; color: var(--danger-color);">
+                    Failed to load models. ${mm_escapeHtml(error.message || 'Unknown error')}
+                </div>
+            `;
+        }
     }
 }
 
@@ -566,7 +637,7 @@ async function mm_fetchCivitAI() {
         progressBar.style.width = (hashProcessed / total * 10).toFixed(0) + '%';
 
         try {
-            const hashResponse = await fetch('/plugins/model_manager/calculate-full-hash', {
+            const hashResponse = await fetch(mm_apiUrl('calculate-full-hash'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ modelIds: [model.id] }),
@@ -575,7 +646,7 @@ async function mm_fetchCivitAI() {
 
             if (mm_civitaiCancelled) return;
 
-            const hashData = await hashResponse.json();
+            const hashData = await mm_readJsonResponse(hashResponse, 'Calculate SHA256');
 
             if (hashData.status === 'success' && hashData.results.length > 0) {
                 const result = hashData.results[0];
@@ -713,19 +784,22 @@ async function mm_fetchCivitAI() {
 
         // Save to backend
         if (civitaiUpdates.length > 0) {
-            fetch('/plugins/model_manager/update-civitai', {
+            fetch(mm_apiUrl('update-civitai'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ updates: civitaiUpdates })
             })
-            .then(r => r.json())
+            .then(r => mm_readJsonResponse(r, 'Save CivitAI metadata'))
             .then(data => {
                 if (data.status === 'success') {
                     console.log(`Saved ${data.updated} models to database`);
                     mm_loadModels();
                 }
             })
-            .catch(err => console.error('Error saving to database:', err));
+            .catch(err => {
+                console.error('Error saving to database:', err);
+                mm_showNotification(`Error saving CivitAI metadata: ${err.message}`, 'error');
+            });
         } else {
             mm_loadModels();
         }
@@ -745,13 +819,14 @@ async function mm_openSettings() {
 
     // Load current settings
     try {
-        const response = await fetch('/plugins/model_manager/settings');
-        const data = await response.json();
+        const response = await fetch(mm_apiUrl('settings'));
+        const data = await mm_readJsonResponse(response, 'Load settings');
         if (data.status === 'success') {
             pathInput.value = data.settings.models_path || '';
         }
     } catch (error) {
         console.error('Failed to load settings:', error);
+        mm_showNotification(`Failed to load settings: ${error.message}`, 'error');
     }
 
     overlay.style.display = 'flex';
@@ -766,8 +841,8 @@ async function mm_detectPaths() {
     suggestionsContainer.innerHTML = '';
 
     try {
-        const detectResponse = await fetch('/plugins/model_manager/detect-paths');
-        const detectData = await detectResponse.json();
+        const detectResponse = await fetch(mm_apiUrl('detect-paths'));
+        const detectData = await mm_readJsonResponse(detectResponse, 'Detect model paths');
 
         if (detectData.status === 'success' && detectData.paths.length > 0) {
             const currentPath = document.getElementById('mm-settings-path').value.trim();
@@ -845,13 +920,13 @@ async function mm_saveSettings() {
     }
 
     try {
-        const response = await fetch('/plugins/model_manager/settings', {
+        const response = await fetch(mm_apiUrl('settings'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ models_path: path })
         });
 
-        const data = await response.json();
+        const data = await mm_readJsonResponse(response, 'Save settings');
 
         if (data.status === 'success') {
             mm_showNotification('Settings saved! Reloading models...', 'success');
