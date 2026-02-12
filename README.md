@@ -21,7 +21,7 @@ This plugin is ready for integration but cannot be installed yet. SmartGallery's
 - **Search & Filter:** Real-time search across all model properties
 - **Batch Operations:** Select multiple models for CivitAI metadata fetching
 
-### New in v0.2.0
+### New in v0.2.1
 
 - **Model Details Overlay:** Row click opens a dedicated details overlay (checkbox click does not open it).
 - **Expanded CivitAI Metadata:** Type, base model, creator, license, model link, and version are now persisted and displayed.

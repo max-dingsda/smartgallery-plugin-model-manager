@@ -155,6 +155,28 @@
   .mm-detail-actions { margin-top: 12px; display: flex; align-items: center; gap: 10px; }
   .mm-copy-status { font-size: 0.85rem; color: var(--text-muted); }
 
+  /* Model details overlay: keep header/legend visible and scroll content internally */
+  #mm-model-overlay {
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  #mm-model-overlay .mm-overlay-box {
+    width: min(1400px, calc(100vw - 40px));
+    max-height: calc(100vh - 40px);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #mm-model-overlay-content {
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 6px;
+  }
+
   /* --- Notification Toast --- */
   #mm-notifications { position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
   .mm-toast {
